@@ -45,10 +45,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/<你的 GitHub 用户名>/dsh-glm-web.git"
+    "url": "git+https://github.com/Lequait/dsh-glm-web.git"
   },
-  "author": "<你的名字>",
+  "author": "Lequait",
   "publishConfig": {
     "access": "public"
+  },
+  "homepage": "https://github.com/Lequait/dsh-glm-web#readme",
+  "bugs": {
+    "url": "https://github.com/Lequait/dsh-glm-web/issues"
   }
 }

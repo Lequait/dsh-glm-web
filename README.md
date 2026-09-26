@@ -19,7 +19,7 @@
    ```powershell
    dsh plugin --profile desktop add github:<owner>/dsh-glm-web   # 从 GitHub
    dsh plugin --profile desktop add dsh-glm-web                  # 从 npm（若已发布）
-   dsh plugin --profile desktop add link:H:\dsh-plugins\dsh-glm-web  # 本地目录
+   dsh plugin --profile desktop add link:<本仓库所在目录>   # 本地目录
    ```
 
 2. **放登录态**（任选其一）：
@@ -84,13 +84,13 @@ dsh plugin --profile desktop add dsh-glm-web
 dsh plugin --profile desktop add github:<owner>/dsh-glm-web
 
 # 方式三：本地 tarball / 源码目录
-dsh plugin --profile desktop add link:H:\dsh-plugins\dsh-glm-web
+dsh plugin --profile desktop add link:<本仓库所在目录>
 ```
 
 装完**重启一次 DSH**（bundle 在冷启动时挂载），然后在模型选择器里选「清言网页 · 通用」。
 
 ```powershell
-dsh plugin --profile web add link:H:\CoreStation\.tmp\dsh-glm-web
+dsh plugin --profile web add <本仓库所在目录>
 ```
 
 ## 登录态（三选一）

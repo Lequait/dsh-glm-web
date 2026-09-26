@@ -1,7 +1,7 @@
 # dsh-glm-web 的 bundle patch：插入插件行（provider 由插件自身注册到 ctx.llm）。
 #
 # 安装：
-#   dsh plugin --profile web add link:H:\CoreStation\.tmp\dsh-glm-web
+#   dsh plugin --profile desktop add link:<本仓库所在目录>
 - insert:
     - id: dsh-glm-web
       name: dsh-glm-web

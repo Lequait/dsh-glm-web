@@ -1,5 +1,5 @@
-url: https://github.com/<你的 GitHub 用户名>/dsh-glm-web
-name: <你的 GitHub 用户名>/dsh-glm-web
+url: https://github.com/Lequait/dsh-glm-web
+name: Lequait/dsh-glm-web
 category: models
 description:
   en: Unofficial Zhipu Qingyan (chatglm.cn) web provider — run DeepSeek Harness on web-app credits with a login token, streaming and prompt-bridged tool calls included.
