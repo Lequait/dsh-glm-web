@@ -141,6 +141,11 @@ dsh plugin --profile web add <本仓库所在目录>
 })()
 ```
 
+> **占位说明行会被忽略**：以 `<` 开头的行不会当作令牌。插件只接受看起来像令牌的值（长度 ≥ 40、不含空白或尖括号、
+> 三段式 JWT 或长 base64 串）；`token.txt` 里只剩占位行时，会直接报「未配置清言登录态」而**不发任何请求**。
+> 这一点是真踩过的坑：占位行曾被当成 `Authorization` 的值发出去，中文触发 undici 的
+> `Cannot convert argument to a ByteString`（报错不含头名，排查代价很大）。
+
 取 token 最省事的一行式：在**你自己已登录的 chatglm.cn 标签页**的控制台里执行（js-cookie 写的 cookie 不是 HttpOnly，
 所以页面自己就能读；这条只读你当前页面的 cookie，不涉及其他应用的凭据库）：
 
