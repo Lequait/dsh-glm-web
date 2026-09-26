@@ -1,0 +1,54 @@
+{
+  "name": "dsh-glm-web",
+  "version": "0.1.0",
+  "description": "用智谱清言（chatglm.cn）网页版登录态做 DSH 的模型 provider：消耗网页版积分，不消耗开放平台 API 额度。Unofficial Zhipu Qingyan web provider for DeepSeek Harness.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "zhipu",
+    "chatglm",
+    "qingyan",
+    "glm",
+    "provider"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./adapter": "./lib/adapter.js",
+    "./chatglm": "./lib/chatglm.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "tools",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "node tools/protocol-test.mjs",
+    "test:live": "node tools/selftest.mjs",
+    "pack": "node tools/pack.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/<你的 GitHub 用户名>/dsh-glm-web.git"
+  },
+  "author": "<你的名字>",
+  "publishConfig": {
+    "access": "public"
+  }
+}
