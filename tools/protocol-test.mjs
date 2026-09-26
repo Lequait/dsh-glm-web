@@ -128,6 +128,31 @@ const parsedMalformed = parseToolCalls(malformed)
 check('畸形「半截+完整」重复块仍能取到参数', parsedMalformed?.[0]?.arguments === '{"text":"ping"}', JSON.stringify(parsedMalformed))
 check('纯垃圾输入不产生伪解析', parseToolCalls('今天天气不错') === null)
 
+// 场景 3.5：分片流 + 汇总快照不得把正文吐两遍（真机 2026-09-26 实测到的观感缺陷）
+const dupServer = http.createServer((req, res) => {
+  let b = ''; req.on('data', (c) => (b += c))
+  req.on('end', () => {
+    if (req.url.includes('user/refresh')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ code: 0, result: { access_token: 'A', refresh_token: 'R' } })); return }
+    if (req.url.includes('conversation/delete')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); return }
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    const emit = (parts, status = '') => res.write('data: ' + JSON.stringify({ conversation_id: 'c', status, parts }) + '\n')
+    const acc = []
+    for (const ch of '你好世界') { acc.push(ch); emit([{ content: [{ type: 'text', text: acc.join('\n') }] }]) }
+    emit([{ content: [{ type: 'text', text: '你好世界' }] }], 'finish')
+    res.end()
+  })
+})
+await new Promise((resolve) => dupServer.listen(0, '127.0.0.1', resolve))
+const dupPort = dupServer.address().port
+const dupClient = createGlmWebClient({
+  fetchImpl: (url, init) => realFetch(String(url).replace('https://chatglm.cn', 'http://127.0.0.1:' + dupPort), init),
+  logger: { info() {}, warn() {} }, minIntervalMs: 0,
+})
+let duplicated = ''
+for await (const ev of dupClient.chat({ refreshToken: 'R', assistantId: '65940acff94777010aa6b796', chatMode: 'zero', prompt: 'P' })) if (ev.kind === 'text') duplicated += ev.delta
+dupServer.close()
+check('分片流+汇总快照不重复吐字', duplicated.replace(/\s+/g, '') === '你好世界', JSON.stringify(duplicated.replace(/\s+/g, '')))
+
 // 场景 4：凭据缺失（例如 token.txt 里只有占位说明行）——必须直接报缺失，且不发任何网络请求
 const seenBeforeMissing = seen.length
 const adapterNoCred = createAdapter({ client, getRefreshToken: async () => undefined, logger: { info() {}, warn() {} } })
