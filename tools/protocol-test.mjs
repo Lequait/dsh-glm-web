@@ -11,7 +11,7 @@
  */
 import http from 'node:http'
 import { createGlmWebClient } from '../lib/chatglm.js'
-import { createAdapter, parseToolCalls } from '../lib/adapter.js'
+import { createAdapter, parseToolCalls, renderToolInstructions } from '../lib/adapter.js'
 
 const ANSWER = '读数完成，a.txt 里是 hello。'
 const THINK = '正在想…'
@@ -161,6 +161,95 @@ for await (const chunk of adapterNoCred.stream({ model: 'glm-web/chat', messages
 const missingFinish = missing.find((c) => c.type === 'finish')
 check('缺凭据时报 MISSING_CREDENTIAL', missingFinish?.reason?.failure?.code === 'MISSING_CREDENTIAL', JSON.stringify(missingFinish?.reason))
 check('缺凭据时不发任何请求（避免把占位文本当令牌发出去）', seen.length === seenBeforeMissing)
+
+// 场景 5：协议块位置 / 预算裁剪 / 截断抢救 / 空调用重试
+check('协议块排在用户内容之后（尾部指令，避免被长上下文埋掉）', promptText.lastIndexOf('[function_calls]') > promptText.indexOf('读 a.txt'))
+check('工具结果回灌带工具名', prompt2.includes('[TOOL_RESULT for call_1] (read_file)'))
+
+const manyTools = Array.from({ length: 60 }, (_, i) => ({
+  name: 'tool_' + i,
+  description: '第 ' + i + ' 个工具',
+  parameters: { type: 'object', properties: { a: { type: 'string', description: 'x'.repeat(120) } } },
+}))
+const budgetPrompt = renderToolInstructions(manyTools, { budgetChars: 3000 })
+check('工具定义按预算裁剪并显式列出未展开项', budgetPrompt.includes('未展开的工具') && budgetPrompt.length < 6000, String(budgetPrompt.length))
+
+// 假服务器：首轮只给"意图句"（不输出信封），收到重试提示后才输出（且故意不闭合 [/call]）——一次覆盖重试与截断抢救
+let retryServerStreams = 0
+const retryServer = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (c) => (body += c))
+  req.on('end', () => {
+    if (req.url.includes('user/refresh')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ code: 0, result: { access_token: 'A', refresh_token: 'R' } })); return }
+    if (req.url.includes('conversation/delete')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); return }
+    retryServerStreams += 1
+    const prompt = textOf(JSON.parse(body || '{}')?.messages?.[0]?.content)
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    const emit = (text, status = '') => res.write('data: ' + JSON.stringify({ conversation_id: 'c', status, parts: [{ content: [{ type: 'text', text }] }] }) + '\n')
+    if (prompt.includes('上一轮你没有按协议输出')) {
+      emit('[function_calls]\n[call:echo]{"text":"ping"}', '') // 故意缺 [/call]，考验截断抢救
+    } else {
+      emit('好的，我来读取文件。', '') // 只有意图句，没有信封
+    }
+    emit('', 'finish')
+    res.end()
+  })
+})
+await new Promise((resolve) => retryServer.listen(0, '127.0.0.1', resolve))
+const retryPort = retryServer.address().port
+const retryClient = createGlmWebClient({
+  fetchImpl: (url, init) => realFetch(String(url).replace('https://chatglm.cn', 'http://127.0.0.1:' + retryPort), init),
+  logger: { info() {}, warn() {} }, minIntervalMs: 0,
+})
+const retryAdapter = createAdapter({ client: retryClient, getRefreshToken: async () => 'R', logger: { info() {}, warn() {} } })
+const retryChunks = []
+for await (const chunk of retryAdapter.stream({
+  model: 'glm-web/chat',
+  messages: [{ role: 'user', content: [{ type: 'text', text: '读 a.txt' }] }],
+  tools: [{ name: 'echo', description: '回显', parameters: { type: 'object', properties: { text: { type: 'string' } } } }],
+})) retryChunks.push(chunk)
+retryServer.close()
+const retryCall = retryChunks.find((c) => c.type === 'block-end' && c.block?.type === 'tool-call')
+check('首轮只说不做时自动追加一次严格重试', retryServerStreams === 2, '实际 stream 次数 ' + retryServerStreams)
+check('重试后拿到工具调用', retryCall?.block?.name === 'echo', JSON.stringify(retryCall?.block?.name))
+check('信封被截断时仍能抢救出参数', retryCall?.block?.arguments === '{"text":"ping"}', String(retryCall?.block?.arguments))
+check('重试成功的回合以 tool-calls 收尾', retryChunks.find((c) => c.type === 'finish')?.reason?.kind === 'tool-calls')
+
+// 场景 6：快照/分片去重的四种形态（真机都遇到过）
+async function streamFrames(frames) {
+  const srv = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (c) => (body += c))
+    req.on('end', () => {
+      if (req.url.includes('user/refresh')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ code: 0, result: { access_token: 'A', refresh_token: 'R' } })); return }
+      if (req.url.includes('conversation/delete')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); return }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      frames.forEach((t, i) => res.write('data: ' + JSON.stringify({ conversation_id: 'c', status: i === frames.length - 1 ? 'finish' : '', parts: [{ content: [{ type: 'text', text: t }] }] }) + '\n'))
+      res.end()
+    })
+  })
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve))
+  const port = srv.address().port
+  const c = createGlmWebClient({
+    fetchImpl: (url, init) => realFetch(String(url).replace('https://chatglm.cn', 'http://127.0.0.1:' + port), init),
+    logger: { info() {}, warn() {} }, minIntervalMs: 0,
+  })
+  let out = ''
+  for await (const ev of c.chat({ refreshToken: 'R', assistantId: '65940acff94777010aa6b796', chatMode: '', prompt: 'P' })) if (ev.kind === 'text') out += ev.delta
+  srv.close()
+  return out
+}
+const norm = (s) => String(s).replace(/\s+/g, '')
+const dedupeCases = [
+  ['完整→短回退→完整', ['HELLO_FROM_FILE_12345', 'HELLO_FROM', 'HELLO_FROM_FILE_12345'], 'HELLO_FROM_FILE_12345'],
+  ['递增分片', ['1', '1+', '1+1', '1+1 等于', '1+1 等于 **2**。'], '1+1 等于 **2**。'],
+  ['带换行分片+干净快照', ['你\n', '你好\n', '你好世界'], '你好世界'],
+  ['逐字分片（真机常见）', ['1\n', '+\n', '1\n', ' \n', '等\n', '于\n', ' **\n', '2\n', '**\n', '。\n'], '1+1 等于 **2**。'],
+]
+for (const [label, frames, expected] of dedupeCases) {
+  const got = norm(await streamFrames(frames))
+  check('去重形态：' + label, got === norm(expected), JSON.stringify(got).slice(0, 60))
+}
 
 server.close()
 console.log(failed === 0 ? '\nRESULT: PASS' : '\nRESULT: FAIL (' + failed + ')')
