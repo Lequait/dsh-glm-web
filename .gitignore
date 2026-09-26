@@ -8,3 +8,6 @@ Thumbs.db
 token.txt
 *.credentials.yaml
 .env
+
+# 本地运维文件（含本机路径与代理端口）
+docs/market-pr.*
