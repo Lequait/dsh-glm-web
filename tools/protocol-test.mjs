@@ -11,7 +11,7 @@
  */
 import http from 'node:http'
 import { createGlmWebClient } from '../lib/chatglm.js'
-import { createAdapter, parseToolCalls, renderToolInstructions } from '../lib/adapter.js'
+import { ACTION_INTENT_RE, createAdapter, parseToolCalls, renderToolInstructions } from '../lib/adapter.js'
 
 const ANSWER = '读数完成，a.txt 里是 hello。'
 const THINK = '正在想…'
@@ -171,6 +171,20 @@ const manyTools = Array.from({ length: 60 }, (_, i) => ({
   description: '第 ' + i + ' 个工具',
   parameters: { type: 'object', properties: { a: { type: 'string', description: 'x'.repeat(120) } } },
 }))
+const realTools = [
+  { name: 'read', description: '读取文件', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+  { name: 'glob', description: '查找文件', parameters: { type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] } },
+]
+const realInstr = renderToolInstructions(realTools)
+check('示例使用会话里真实存在的工具名与参数', realInstr.includes('[call:read]{"path"'), realInstr.slice(realInstr.indexOf('正确示例'), realInstr.indexOf('正确示例') + 90).replace(/\n/g, ' '))
+check('含「漏参数」反例与「编造工具名」反例', realInstr.includes('参数不能省') && realInstr.includes('open_url'))
+check('含「没有浏览器/联网/file:// 能力」的否定说明', realInstr.includes('没有浏览器、联网抓取或 file:// 协议能力'))
+check('意图正则能识别跑偏形态（file:// / open_url / 联网检索）', ACTION_INTENT_RE.test('我尝试通过 open_url 访问 file:///H:/x.md') && ACTION_INTENT_RE.test('需要联网检索一下'))
+const dupCalls = parseToolCalls('[function_calls]\\n[call:read]{"path":"a.md"}[/call]\\n[/function_calls]\\n[function_calls]\\n[call:read]{"path":"a.md"}[/call]\\n[/function_calls]')
+check('完全重复的调用被去重（半截+完整两份）', dupCalls?.length === 1, JSON.stringify(dupCalls))
+const twoCalls = parseToolCalls('[function_calls][call:read]{"path":"a.md"}[/call][call:read]{"path":"b.md"}[/call][/function_calls]')
+check('两个不同的调用都要保留', twoCalls?.length === 2, String(twoCalls?.length))
+
 const budgetPrompt = renderToolInstructions(manyTools, { budgetChars: 3000 })
 check('工具定义按预算裁剪并显式列出未展开项', budgetPrompt.includes('未展开的工具') && budgetPrompt.length < 6000, String(budgetPrompt.length))
 
