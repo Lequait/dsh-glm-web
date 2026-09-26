@@ -128,6 +128,15 @@ const parsedMalformed = parseToolCalls(malformed)
 check('畸形「半截+完整」重复块仍能取到参数', parsedMalformed?.[0]?.arguments === '{"text":"ping"}', JSON.stringify(parsedMalformed))
 check('纯垃圾输入不产生伪解析', parseToolCalls('今天天气不错') === null)
 
+// 场景 4：凭据缺失（例如 token.txt 里只有占位说明行）——必须直接报缺失，且不发任何网络请求
+const seenBeforeMissing = seen.length
+const adapterNoCred = createAdapter({ client, getRefreshToken: async () => undefined, logger: { info() {}, warn() {} } })
+const missing = []
+for await (const chunk of adapterNoCred.stream({ model: 'glm-web/chat', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] })) missing.push(chunk)
+const missingFinish = missing.find((c) => c.type === 'finish')
+check('缺凭据时报 MISSING_CREDENTIAL', missingFinish?.reason?.failure?.code === 'MISSING_CREDENTIAL', JSON.stringify(missingFinish?.reason))
+check('缺凭据时不发任何请求（避免把占位文本当令牌发出去）', seen.length === seenBeforeMissing)
+
 server.close()
 console.log(failed === 0 ? '\nRESULT: PASS' : '\nRESULT: FAIL (' + failed + ')')
 process.exitCode = failed === 0 ? 0 : 1
