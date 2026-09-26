@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.4
+
+定位到「读盘冷启动失败」的真正根因，并修掉「同样的消息发两遍」。
+
+**根因：会话是 PTC（程序化调用）模式，模型能直接调用的工具只有 `run_code`。** 而 0.1.2/0.1.3 的说明书在规则里举例“调用 read/glob 之类”——这两个工具在该会话里根本不存在，模型于是退回到它自己的联网/文件协议习惯（`file://`、search/open），全程没有调用任何工具（会话记录：`toolCalls=0`、`file://` 出现 6 次）。
+
+- **PTC 感知**：检测到工具列表里有“执行代码”类工具（参数含 `code`/`script`）时，说明书追加一段专门说明与**真实示例**：`[call:run_code]{"code":"const r = await tools.read({ file_path: '...' }); return r.lines" }`，并明确“不要写 file://、不要假设存在 search/open 这类工具”。
+- **规则里不再出现任何硬编码工具名**（此前的 `read/glob` 就是错误举例）。
+- **重试改为静默**：空调用重试只取工具调用、不再回吐第二次正文 —— 这是“同样的消息发两遍”的一个确切机制。
+- **完全空响应报 `EMPTY_RESPONSE`**（可重试并带明确提示），而不是静默空回合；同时写一条 warn 日志，便于把“两遍”归因。
+
+离线回归 **40 项全过**；真机复刻（工具只有 `run_code` + 长中文 system prompt + 读 `H:\CoreStation\docs\STATE.md`）→ 产出**恰好一个** `run_code` 调用，代码为 `await tools.read({ file_path: 'H:/CoreStation/docs/STATE.md' })`，`finish=tool-calls`。
+
+## 0.1.3
 ## 0.1.3
 
 第二轮真机反馈「还是读不到文件（走 file:// / 联网检索）」后的加固。

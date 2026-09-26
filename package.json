@@ -1,6 +1,6 @@
 {
   "name": "dsh-glm-web",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "用智谱清言（chatglm.cn）网页版登录态做 DSH 的模型 provider：消耗网页版积分，不消耗开放平台 API 额度。Unofficial Zhipu Qingyan web provider for DeepSeek Harness.",
   "keywords": [
     "dsh",

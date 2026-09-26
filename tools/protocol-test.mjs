@@ -178,6 +178,9 @@ const realTools = [
 const realInstr = renderToolInstructions(realTools)
 check('示例使用会话里真实存在的工具名与参数', realInstr.includes('[call:read]{"path"'), realInstr.slice(realInstr.indexOf('正确示例'), realInstr.indexOf('正确示例') + 90).replace(/\n/g, ' '))
 check('含「漏参数」反例与「编造工具名」反例', realInstr.includes('参数不能省') && realInstr.includes('open_url'))
+const ptcInstr = renderToolInstructions([{ name: 'run_code', description: '执行代码', parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] } }])
+check('PTC 会话（只有 run_code）会给出程序化调用说明与示例', ptcInstr.includes('程序化调用') && ptcInstr.includes('[call:run_code]') && ptcInstr.includes('await tools.<工具名>'))
+check('非 PTC 会话不会出现该段落', !realInstr.includes('程序化调用'))
 check('含「没有浏览器/联网/file:// 能力」的否定说明', realInstr.includes('没有浏览器、联网抓取或 file:// 协议能力'))
 check('意图正则能识别跑偏形态（file:// / open_url / 联网检索）', ACTION_INTENT_RE.test('我尝试通过 open_url 访问 file:///H:/x.md') && ACTION_INTENT_RE.test('需要联网检索一下'))
 const dupCalls = parseToolCalls('[function_calls]\\n[call:read]{"path":"a.md"}[/call]\\n[/function_calls]\\n[function_calls]\\n[call:read]{"path":"a.md"}[/call]\\n[/function_calls]')
@@ -228,6 +231,31 @@ check('首轮只说不做时自动追加一次严格重试', retryServerStreams 
 check('重试后拿到工具调用', retryCall?.block?.name === 'echo', JSON.stringify(retryCall?.block?.name))
 check('信封被截断时仍能抢救出参数', retryCall?.block?.arguments === '{"text":"ping"}', String(retryCall?.block?.arguments))
 check('重试成功的回合以 tool-calls 收尾', retryChunks.find((c) => c.type === 'finish')?.reason?.kind === 'tool-calls')
+const retryText = retryChunks.filter((c) => c.type === 'text-delta').map((c) => c.text).join('')
+check('重试是静默的：首轮正文只出现一次', retryText === '好的，我来读取文件。', JSON.stringify(retryText))
+
+// 场景 7：完全空响应 → 明确的可重试错误（而不是静默的空回合）
+const emptyServer = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (c) => (body += c))
+  req.on('end', () => {
+    if (req.url.includes('user/refresh')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ code: 0, result: { access_token: 'A', refresh_token: 'R' } })); return }
+    if (req.url.includes('conversation/delete')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); return }
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.write('data: ' + JSON.stringify({ conversation_id: 'c', status: 'finish', parts: [{ content: [{ type: 'text', text: '' }] }] }) + '\n')
+    res.end()
+  })
+})
+await new Promise((resolve) => emptyServer.listen(0, '127.0.0.1', resolve))
+const emptyPort = emptyServer.address().port
+const emptyClient = createGlmWebClient({
+  fetchImpl: (url, init) => realFetch(String(url).replace('https://chatglm.cn', 'http://127.0.0.1:' + emptyPort), init),
+  logger: { info() {}, warn() {} }, minIntervalMs: 0,
+})
+const emptyChunks = []
+for await (const c of createAdapter({ client: emptyClient, getRefreshToken: async () => 'R', logger: { info() {}, warn() {} } }).stream({ model: 'glm-web/chat', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] })) emptyChunks.push(c)
+emptyServer.close()
+check('空响应报 EMPTY_RESPONSE（可重试）而非静默空回合', emptyChunks.find((c) => c.type === 'finish')?.reason?.failure?.code === 'EMPTY_RESPONSE')
 
 // 场景 6：快照/分片去重的四种形态（真机都遇到过）
 async function streamFrames(frames) {
